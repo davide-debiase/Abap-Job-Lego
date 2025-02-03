@@ -1,0 +1,10 @@
+CREATE TABLE ZJOB_LOG (
+  CLIENT        MANDT,             " mandant
+  JOB_ID        CHAR32,            " ID job
+  START_TIME    TIMESTAMP,         " start time
+  END_TIME      TIMESTAMP,         " end time
+  RECORDS_PROCESSED INT4,         " num records
+  STATUS        CHAR2,             " status
+  ERROR_MESSAGE CHAR255,           " error message
+  PRIMARY KEY (CLIENT, JOB_ID)
+).

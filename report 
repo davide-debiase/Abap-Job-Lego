@@ -1,0 +1,117 @@
+REPORT zbatch_monitor_po.
+
+DATA: lv_job_id TYPE char32,
+      lv_start_time TYPE timestamp,
+      lv_end_time TYPE timestamp,
+      lv_status TYPE char2,
+      lv_error_msg TYPE char255,
+      lv_records_processed TYPE int4.
+
+DATA: lt_po_data TYPE TABLE OF ekko,
+      lt_po_items TYPE TABLE OF ekpo,
+      lt_monitor_data TYPE TABLE OF zmonitor_po,
+      ls_monitor_data TYPE zmonitor_po,
+      lv_date_from TYPE sy-datum,
+      lv_date_to TYPE sy-datum.
+
+* id job creation 
+CALL FUNCTION 'GUID_CREATE'
+  IMPORTING
+    ev_guid_32 = lv_job_id.
+
+lv_start_time = sy-uzeit.
+
+* initialize the log row
+INSERT INTO zjob_log VALUES ( sy-mandt, lv_job_id, lv_start_time, NULL, 0, 'P', '' ).
+
+* 1 detailed step
+INSERT INTO zjob_log_detail VALUES ( sy-mandt, lv_job_id, '001', sy-uzeit, 'Job Started' ).
+
+TRY.
+  * initialize two variable for the select on the ekko
+  lv_date_from = sy-datum - 30.
+  lv_date_to   = sy-datum.
+
+  * retrieve po's
+  SELECT ebeln lifnr aedat 
+    INTO TABLE lt_po_data
+    FROM ekko
+    WHERE aedat BETWEEN lv_date_from AND lv_date_to.
+
+* 2 detailed step
+
+  INSERT INTO zjob_log_detail VALUES ( sy-mandt, lv_job_id, '002', sy-uzeit, 'Selected Purchase Orders' ).
+
+  IF lt_po_data IS NOT INITIAL.
+    
+ * select from ekpo , po's with more than 100 days of payment
+    SELECT ebeln ebelp plifz 
+      INTO TABLE lt_po_items
+      FROM ekpo
+      FOR ALL ENTRIES IN lt_po_data
+      WHERE ebeln = lt_po_data-ebeln
+        AND plifz > 100.
+
+* 3 detailed step
+
+    INSERT INTO zjob_log_detail VALUES ( sy-mandt, lv_job_id, '003', sy-uzeit, 'Filtered PO Items with Payment Terms > 100' ).
+
+    IF lt_po_items IS NOT INITIAL.
+      
+      LOOP AT lt_po_items INTO DATA(ls_item).
+        READ TABLE lt_po_data INTO DATA(ls_po) WITH KEY ebeln = ls_item-ebeln.
+
+        CLEAR ls_monitor_data.
+        ls_monitor_data-po_number = ls_item-ebeln.
+        ls_monitor_data-po_item = ls_item-ebelp.
+        ls_monitor_data-created_on = ls_po-aedat.
+        ls_monitor_data-supplier = ls_po-lifnr.
+        ls_monitor_data-payment_terms = ls_item-plifz.
+        ls_monitor_data-status = 'P'. " Pending
+
+        APPEND ls_monitor_data TO lt_monitor_data.
+      ENDLOOP.
+
+      * write the result in a custom table ( i don't know if it is correct is just for test purpose )
+      INSERT zporesults FROM TABLE lt_monitor_data.
+
+      IF sy-subrc = 0.
+        lv_records_processed = LINES( lt_monitor_data ).
+        * 4 detailed step
+        INSERT INTO zjob_log_detail VALUES ( sy-mandt, lv_job_id, '004', sy-uzeit, 'Data Inserted in Monitoring Table' ).
+      ELSE.
+        RAISE EXCEPTION TYPE cx_sy_sql_error.
+      ENDIF.
+
+    ELSE.
+    * log a possible error
+      INSERT INTO zjob_log_detail VALUES ( sy-mandt, lv_job_id, '005', sy-uzeit, 'No PO Items found with Payment Terms > 100 days' ).
+    ENDIF.
+
+  ELSE.
+   * log a possible error
+    INSERT INTO zjob_log_detail VALUES ( sy-mandt, lv_job_id, '006', sy-uzeit, 'No Purchase Orders found in last 30 days' ).
+  ENDIF.
+
+  * success 
+  lv_status = 'OK'.
+  lv_error_msg = ''.
+
+CATCH cx_sy_sql_error INTO DATA(lx_sql).
+* catch error on sql
+  lv_status = 'KO'.
+  lv_error_msg = lx_sql->get_text( ).
+  * log last step in the detail table
+  INSERT INTO zjob_log_detail VALUES ( sy-mandt, lv_job_id, '999', sy-uzeit, lv_error_msg ).
+
+ENDTRY.
+
+lv_end_time = sy-uzeit.
+
+* update the main log table
+UPDATE zjob_log
+  SET end_time = lv_end_time,
+      records_processed = lv_records_processed,
+      status = lv_status,
+      error_message = lv_error_msg
+  WHERE job_id = lv_job_id.

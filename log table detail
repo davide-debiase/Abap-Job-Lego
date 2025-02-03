@@ -1,0 +1,8 @@
+CREATE TABLE ZJOB_LOG_DETAIL (
+  CLIENT        MANDT,             " Mandant
+  PARENT_ID     CHAR32,            " ID job
+  STEP_ID       CHAR4,             " ID step
+  STEP_TIME     TIMESTAMP,         " Timestamp step
+  STEP_MESSAGE  CHAR255,           " Message step
+  PRIMARY KEY (CLIENT, PARENT_ID, STEP_ID)
+).
